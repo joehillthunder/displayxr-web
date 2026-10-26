@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>glb-preview — DisplayXR inline-3D sample</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f6f4; --fg: #1b1b1b; --muted: #1b1b1bb0; --line: #8885; --accent: #3b82f6; --warn: #b45309; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111214; --fg: #ececec; --muted: #ececec9c; --warn: #f59e0b; } }
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 16px 64px}
+  h1{font-size:26px;margin:0 0 2px}
+  .sub{color:var(--muted);margin:0 0 20px}
+  code{background:#8882;padding:1px 5px;border-radius:4px}
+  a{color:var(--accent)}
+
+  .layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px}
+  @media (max-width: 720px) { .layout{grid-template-columns:minmax(0,1fr)} .list{order:2;max-height:240px} }
+  .list{border:1px solid var(--line);border-radius:8px;padding:6px;overflow:auto;max-height:560px}
+  .list:empty{display:none}
+  .list button{display:block;width:100%;text-align:left;font:inherit;font-size:14px;color:inherit;
+               background:transparent;border:0;border-radius:6px;padding:6px 8px;cursor:pointer}
+  .list button[aria-current="true"]{background:#3b82f633;font-weight:600}
+  .list button:focus-visible{outline:2px solid var(--accent)}
+  .list small{display:block;color:var(--muted);font-size:12px}
+
+  /* The stage. The canvas is BARE (woven-canvas-rules §7): no border, radius, shadow, filter or
+     opacity on it or any ancestor. will-change from its first paint (rule 4). */
+  .stage{position:relative}
+  canvas.tile{display:block;width:100%;aspect-ratio:16/10;will-change:transform;cursor:grab;background:#000}
+  canvas.tile:active{cursor:grabbing}
+  /* Rule 5: a cover ON TOP of the canvas, cut (never faded) on firstWoven. */
+  .cover{position:absolute;inset:0;background:var(--bg);display:grid;place-items:center;color:var(--muted);font-size:14px}
+  .cover[hidden]{display:none}
+  .drop .cover{outline:2px dashed var(--accent);outline-offset:-8px}
+
+  .meta{display:flex;flex-wrap:wrap;gap:6px 18px;margin:10px 0 0;font-size:14px}
+  .meta .name{font-weight:600}
+  .meta .size{font-variant-numeric:tabular-nums}
+  .lic{font-size:13px;color:var(--muted);margin:4px 0 0;min-height:1.4em}
+  .ai{color:var(--warn)}
+
+  .ctl{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:14px 0 0;font-size:14px}
+  .ctl input[type=range]{width:220px}
+  .ctl button,.ctl label.file{font:inherit;font-size:14px;border:1px solid var(--line);background:transparent;
+       color:inherit;border-radius:6px;padding:5px 12px;cursor:pointer}
+  .ctl input[type=url]{font:inherit;font-size:14px;min-width:0;flex:1 1 240px;padding:5px 8px;border:1px solid var(--line);
+       border-radius:6px;background:transparent;color:inherit}
+  .ctl .num{font-variant-numeric:tabular-nums;min-width:3.5em;display:inline-block}
+  .readout{font-size:13px;color:var(--muted);margin-top:8px;font-variant-numeric:tabular-nums;min-height:1.4em}
+  .readout .over{color:var(--warn)}
+  .err{color:#dc2626}
+  .foot{margin-top:30px;font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>glb-preview</h1>
+  <p class="sub">Any glTF / GLB as a glasses-free 3D window, framed inside the display's comfort budget,
+     with a live depth control. For generated assets (image → 3D) and asset-library kits.</p>
+
+  <div class="layout">
+    <nav class="list" id="list" aria-label="Assets"></nav>
+    <div>
+      <div class="stage" id="stage">
+        <canvas class="tile" id="tile" aria-label="3D preview — drag to turn, wheel to zoom"></canvas>
+        <div class="cover" id="cover">Loading…</div>
+      </div>
+
+      <div class="meta">
+        <span class="name" id="name">—</span>
+        <span class="size" id="size"></span>
+        <span id="src" style="color:var(--muted)"></span>
+      </div>
+      <p class="lic" id="lic"></p>
+
+      <div class="ctl">
+        <label for="depth">Depth</label>
+        <input type="range" id="depth" min="0" max="100" step="1" value="100" aria-describedby="depthNote">
+        <span class="num" id="depthVal">100 %</span>
+        <label><input type="checkbox" id="above"> above comfort</label>
+        <button type="button" id="reset">Reset view</button>
+      </div>
+      <p class="readout" id="depthNote">100 % = the comfort budget for this asset (0.14 % of panel width in front, 0.42 % behind).</p>
+
+      <div class="ctl">
+        <label class="file">Open .glb…<input type="file" id="file" accept=".glb,.gltf,model/gltf-binary" hidden></label>
+        <input type="url" id="url" placeholder="https://…/asset.glb" aria-label="GLB URL">
+        <button type="button" id="load">Load URL</button>
+      </div>
+      <p class="readout" id="status"></p>
+    </div>
+  </div>
+
+  <p class="foot">URL parameters: <code>?glb=&lt;url&gt;</code> one asset ·
+     <code>?list=&lt;manifest.json&gt;</code> a list (<code>[{name, url, size_m, kit, licence}]</code>, or
+     <code>{assets: […]}</code>; URLs relative to the manifest) · <code>&amp;licence=</code> a licence line ·
+     <code>&amp;depth=0–200</code> start depth in % of comfort. Drop a .glb on the tile to open it.
+     Files are read with <code>cache: 'no-store'</code> and never stored by this page.
+     A <code>&lt;name&gt;.stability.json</code> sidecar next to a GLB (written by displayxr-stability) is shown as
+     its AI-generation provenance.<br>
+     ← <a href="../../">All samples</a> · Default model: "Damaged Helmet" © 2018 ctxwing,
+     <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>, from an earlier model © 2016
+     theblueturtle_, <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>, via
+     Khronos glTF-Sample-Assets.</p>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+  "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/2.1.0/spark.module.js",
+  "playcanvas": "https://cdn.jsdelivr.net/npm/playcanvas@2.22.3/build/playcanvas.mjs",
+  "meshoptimizer/decoder": "https://cdn.jsdelivr.net/npm/meshoptimizer@1.2.0/meshopt_decoder.mjs",
+  "@displayxr/inline3d": "../../js/inline3d.js",
+  "@displayxr/inline3d/splat": "../../js/inline3d-splat.js"
+} }
+</script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
