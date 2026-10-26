@@ -74,7 +74,7 @@ function placeholderSplat() {
 
 // ── Loading ─────────────────────────────────────────────────────────────────────────────────
 /**
- * entry: { name, url?, file?, size_m?, licence?, kit? }. Files are read with cache:'no-store' and
+ * entry: { name, url?, file?, size_m? (number or [x, y, z] m), licence?, kit? }. Files are read with cache:'no-store' and
  * handed to the engine as an object URL, so this page never keeps a copy of a library asset.
  */
 async function show(entry) {
@@ -216,10 +216,11 @@ async function describe(entry) {
   $('src').textContent = entry.kit ? entry.kit : '';
   const ext = h.rig?.frame?.extent;
   const fmt = (n) => (n >= 10 ? n.toFixed(1) : n.toFixed(2));
-  if (Number.isFinite(entry.size_m)) {
-    $('size').textContent = `real size ${fmt(entry.size_m)} m`;
+  if (entry.size_m !== undefined) {
+    $('size').textContent = `real size ${sizeText(entry.size_m, fmt)} m`;
   } else if (ext) {
-    $('size').textContent = `${ext.map(fmt).join(' × ')} m (glTF units)`;
+    // glTF units are metres by spec; this is the file's own bounding box.
+    $('size').textContent = `${ext.map(fmt).join(' × ')} m (file bounds)`;
   } else {
     $('size').textContent = '';
   }
@@ -267,11 +268,19 @@ async function loadList(listUrl) {
   return (Array.isArray(j) ? j : j.assets || []).map((a) => ({
     name: a.name || a.url,
     url: new URL(a.url, base).href,
-    size_m: Number.isFinite(Number(a.size_m)) && a.size_m !== null && a.size_m !== '' ? Number(a.size_m) : undefined,
+    size_m: parseSize(a.size_m),
     kit: a.kit,
     licence: a.licence || a.license,
   }));
 }
+
+/** size_m: one number (largest extent) or [x, y, z], in metres; anything else is ignored. */
+function parseSize(v) {
+  if (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(Number(n)))) return v.map(Number);
+  if (v === null || v === '' || Array.isArray(v)) return undefined;
+  return Number.isFinite(Number(v)) ? Number(v) : undefined;
+}
+const sizeText = (v, fmt) => (Array.isArray(v) ? v.map(fmt).join(' × ') : fmt(v));
 
 function renderList(entries) {
   const nav = $('list');
@@ -280,9 +289,9 @@ function renderList(entries) {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = e.name;
-    if (Number.isFinite(e.size_m) || e.kit) {
+    if (e.size_m !== undefined || e.kit) {
       const s = document.createElement('small');
-      s.textContent = [e.kit, Number.isFinite(e.size_m) ? `${e.size_m} m` : ''].filter(Boolean).join(' · ');
+      s.textContent = [e.kit, e.size_m !== undefined ? `${sizeText(e.size_m, (n) => String(+n.toFixed(1)))} m` : ''].filter(Boolean).join(' · ');
       b.append(s);
     }
     b.addEventListener('click', () => pick(b, e));
